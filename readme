@@ -1,0 +1,11 @@
+token issuer
+ (mint)
+- tokensMinted: mapping of addr -> mapping of ( time -> amt ) 
+
+token withdrawer 
+(lock)
+- tokensLocked: mapping of addr -> mapping of 
+
+
+-- both must have the same supply at all times
+-- 
