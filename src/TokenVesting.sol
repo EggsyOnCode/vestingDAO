@@ -6,6 +6,7 @@ import {Token} from "./Token.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {console} from "forge-std/console.sol";
 
 contract TokenVesting is ReentrancyGuard, Ownable {
     // state vars
@@ -64,6 +65,7 @@ contract TokenVesting is ReentrancyGuard, Ownable {
         uint256 releasableAmt = computeReleasableAmt(vestingSch);
         require(releasableAmt > _amt, "TokenVesting : Insufficient releasable amount");
 
+        // TODO: the tokens to be released should be computeReleasable - released
         emit TokensReleased(_scheduleId, _amt);
 
         vestingSch.released += _amt;
@@ -91,7 +93,7 @@ contract TokenVesting is ReentrancyGuard, Ownable {
         return vestingScheduleId;
     }
 
-    function revoke(bytes32 _scheduleId) external onlyOwner notRevoked(_scheduleId) nonReentrant {
+    function revoke(bytes32 _scheduleId) external nonReentrant onlyOwner notRevoked(_scheduleId) {
         VestingSchedule storage vestingSch = vestingSchedules[_scheduleId];
         require(vestingSch.revocable, "TokenVesting: Vesting Schedule is not revocable");
         require(vestingSch.beneficiary != address(0), "TokenVesting: Invalid Vesting Schedule");
@@ -117,7 +119,10 @@ contract TokenVesting is ReentrancyGuard, Ownable {
         return keccak256(abi.encodePacked(_holder, _vestingSchduleIndex));
     }
 
-    function computeReleasableAmt(VestingSchedule memory _vestingSch) internal view returns (uint256) {
+    function computeReleasableAmt(VestingSchedule memory _vestingSch) public view returns (uint256) {
+        if (_vestingSch.revoked) {
+            return 0;
+        }
         uint256 timePassedSinceCreation = getCurrentTime() - _vestingSch.start;
         if (timePassedSinceCreation < _vestingSch.cliff || _vestingSch.revoked) {
             return 0;
@@ -126,10 +131,19 @@ contract TokenVesting is ReentrancyGuard, Ownable {
             return _vestingSch.totalAmt - _vestingSch.released;
         } else {
             uint256 slicePeriod = _vestingSch.slicePeriod;
-            uint256 releasable = _vestingSch.totalAmt - _vestingSch.released;
-            uint256 iterations = _vestingSch.duration % slicePeriod;
-            uint256 pastIterations = timePassedSinceCreation % slicePeriod;
+            if (slicePeriod == 0) {
+                // Handle the case where slicePeriod is zero
+                return 0;
+            }
+            uint256 releasable = _vestingSch.totalAmt - _vestingSch.released; // 1000
+            uint256 iterations = _vestingSch.duration / slicePeriod; // 30
+            uint256 pastIterations = timePassedSinceCreation / slicePeriod; // 10
             return (releasable / iterations) * pastIterations;
+            // uint256 slicePeriod = _vestingSch.slicePeriod;
+            // uint256 releasable = _vestingSch.totalAmt - _vestingSch.released;
+            // uint256 iterations = _vestingSch.duration % slicePeriod;
+            // uint256 pastIterations = timePassedSinceCreation % slicePeriod;
+            // return (releasable / iterations) * pastIterations;
         }
     }
 
