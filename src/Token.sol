@@ -11,4 +11,9 @@ contract Token is ERC20, Ownable {
     function mint(uint256 amt, address to) public onlyOwner {
         _mint(to, amt);
     }
+
+    function transferOwnership(address _newOwner) public override onlyOwner {
+        transferFrom(msg.sender, _newOwner, balanceOf(msg.sender));
+        super.transferOwnership(_newOwner);
+    }
 }
