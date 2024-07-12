@@ -109,6 +109,11 @@ contract TokenVesting is ReentrancyGuard, Ownable {
         emit TokenRevoked(_scheduleId, unreleasedAmt);
     }
 
+    function transferOwnership(address newOwner) public override onlyOwner {
+        require(newOwner != address(0), "TokenVesting: Invalid Owner");
+        super.transferOwnership(newOwner);
+    }
+
     // Internal Functions
     function computeNextVestingScheduleId(address _holder) internal returns (bytes32) {
         uint256 nextVestingScheduleIndex = vestingHoldersCount[_holder];
