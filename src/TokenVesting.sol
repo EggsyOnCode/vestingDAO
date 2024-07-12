@@ -56,7 +56,7 @@ contract TokenVesting is ReentrancyGuard, Ownable {
 
     // Public Functions
 
-    function release(bytes32 _scheduleId, uint256 _amt) public nonReentrant notRevoked(_scheduleId) {
+    function release(bytes32 _scheduleId, uint256 _amt) public nonReentrant notRevoked(_scheduleId) onlyOwner {
         VestingSchedule storage vestingSch = vestingSchedules[_scheduleId];
         require(msg.sender == vestingSch.beneficiary || msg.sender == owner(), "TokenVesting: Invalid Caller");
         require(vestingSch.beneficiary != address(0), "TokenVesting: Invalid Vesting Schedule");
@@ -154,6 +154,10 @@ contract TokenVesting is ReentrancyGuard, Ownable {
 
     function getCurrentTime() internal view virtual returns (uint256) {
         return block.timestamp;
+    }
+
+    function monthToSeconds(uint256 _months) internal pure returns (uint256) {
+        return _months * 30 days;
     }
 
     // Getter Functions
