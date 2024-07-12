@@ -3,124 +3,127 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Token} from "../src/Token.sol";
+import {TokenMarketplace} from "../src/TokenMarketplace.sol";
 import {TokenVesting} from "../src/TokenVesting.sol";
+import {MockV3Aggregator} from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 
-contract TestVesting is Test {
-    Token private i_token;
-    TokenVesting private tVesting;
-    uint256 public constant TOKEN_AMT = 10000;
+contract TokenMarketplaceTest is Test {
+    TokenMarketplace public marketplace;
+    uint256 public fork;
+    address public USER = makeAddr("tester");
+    MockV3Aggregator public mockAggregator;
+    Token public token;
+    TokenVesting public vestingScheduler;
+    address public usdtAddress = 0x1919F400B861D2169DB60178df9DBc4dfe5a9A45; // USDT contract on Ethereum mainnet
+    address public mockPriceFeed;
 
     function setUp() public {
-        i_token = new Token(address(this));
-        tVesting = new TokenVesting(address(i_token));
-        i_token.mint(TOKEN_AMT, address(tVesting));
-        i_token.transferOwnership(address(tVesting));
+        // Fork from the Ethereum mainnet
+        string memory RPC_URL = vm.envString("RPC_URL");
+        fork = vm.createFork(RPC_URL);
+        vm.selectFork(fork);
+
+        // Deploy your contracts
+        token = new Token(address(this));
+        vestingScheduler = new TokenVesting(address(token));
+        mockAggregator = new MockV3Aggregator(8, 2000 * 10 ** 8);
+        mockPriceFeed = address(mockAggregator); // Example mock price feed with 2000 USDT per ETH
+
+        marketplace = new TokenMarketplace(
+            address(token),
+            address(vestingScheduler),
+            mockPriceFeed,
+            usdtAddress,
+            1 * 10 ** 18, // price of token is 1 eth
+            true // Enable revoking
+        );
+        // Transfer ownership of the token to the marketplace
+        token.transferOwnership(address(marketplace));
+        vestingScheduler.transferOwnership(address(marketplace));
+        fundUSER();
     }
 
-    function testVestingSchedule() public {
-        // create a vesting schedule
-        uint256 totalAmt = 1000;
-        uint256 duration = 12;
-        uint256 cliff = 3;
-        uint256 slicePeriod = 1;
-        uint256 start = block.timestamp;
-        bool revocable = true;
-        bytes32 vestingScheduleId =
-            tVesting.createVestingSchedule(address(this), totalAmt, duration, slicePeriod, cliff, revocable);
-        // check the vesting schedule
-        TokenVesting.VestingSchedule memory vs = tVesting.getVestingSchedule(vestingScheduleId);
-        assertEq(vs.beneficiary, address(this));
-        assertEq(vs.totalAmt, totalAmt);
-        assertEq(vs.released, 0);
-        assertEq(vs.duration, duration);
-        assertEq(vs.cliff, cliff);
-        assertEq(vs.slicePeriod, slicePeriod);
-        assertEq(vs.start, start);
-        assertEq(vs.revocable, revocable);
-        assertEq(vs.revoked, false);
+    function fundUSER() public {
+        // Impersonate a rich USDT account
+        address richUSDTAccount = 0x085a958427aaA3Ac8Be6174F630a96641538E280;
+        uint256 usdtAmt = 1000 * 10 ** 6; // 1000 USDT with 6 decimals
+
+        vm.startPrank(richUSDTAccount);
+        IERC20(usdtAddress).transfer(USER, usdtAmt);
+        vm.stopPrank();
     }
 
-    function testReleaseSchedule() public {
-        // create a vesting schedule
-        uint256 totalAmt = 1000;
-        uint256 duration = 30 * 24 * 60 * 60; // 30 days
-        uint256 cliff = 10 * 24 * 60 * 60; // 10 days
-        uint256 slicePeriod = 1 * 24 * 60 * 60; // 1 day
-        uint256 start = block.timestamp;
-        bool revocable = true;
-        bytes32 vestingScheduleId =
-            tVesting.createVestingSchedule(address(this), totalAmt, duration, slicePeriod, cliff, revocable);
+    function testBuyTokensWithDiscount() public {
+        // Set up test parameters
+        uint256 usdtAmt = 1000 * 10 ** 6; // 1000 USDT with 6 decimals
+        uint8 scheme = 0; // Choose a vesting scheme
+        address buyer = USER;
 
-        vm.warp(start + 1 * 24 * 60 * 60);
-        vm.expectRevert();
-        tVesting.release(vestingScheduleId, 4);
+        // Impersonate an account with USDT
+        vm.startPrank(buyer);
+        IERC20(usdtAddress).approve(address(marketplace), usdtAmt);
 
-        vm.warp(start + cliff + 1 * 24 * 60 * 60);
-        tVesting.release(vestingScheduleId, 4);
+        // Call the buyTokensWithDiscount function
+        bytes32 scheduleId = marketplace.buyTokensWithDiscount(usdtAmt, scheme);
 
-        TokenVesting.VestingSchedule memory vs = tVesting.getVestingSchedule(vestingScheduleId);
-        vm.assertEq(vs.released, 4);
+        // Assert the expected outcomes
+        TokenVesting.VestingSchedule memory schedule = vestingScheduler.getVestingSchedule(scheduleId);
+        (, int256 answer,,,) = mockAggregator.latestRoundData();
+        emit log_int(answer);
+        assertNotEq(schedule.totalAmt, 0);
+        assertEq(schedule.totalAmt * 100, 350);
+
+        vm.stopPrank();
     }
 
-    function testComputeReleasableAmt() public {
-        // create a vesting schedule
-        uint256 totalAmt = 1000;
-        uint256 duration = 30 * 24 * 60 * 60; // 30 days
-        uint256 cliff = 10 * 24 * 60 * 60; // 10 days
-        uint256 slicePeriod = 1 * 24 * 60 * 60; // 1 day
-        uint256 start = block.timestamp;
-        bool revocable = true;
-        bytes32 vestingScheduleId =
-            tVesting.createVestingSchedule(address(this), totalAmt, duration, slicePeriod, cliff, revocable);
+    function testReleaseTokens() public {
+        uint256 usdtAmt = 1000 * 10 ** 6; // 1000 USDT
+        uint8 scheme = 1;
 
-        TokenVesting.VestingSchedule memory vs = tVesting.getVestingSchedule(vestingScheduleId);
-        vm.warp(start + 9 * 24 * 60 * 60);
-        uint256 releasableAmt = tVesting.computeReleasableAmt(vs);
-        vm.assertEq(releasableAmt, 0);
+        address buyer = USER;
+        vm.startPrank(buyer);
 
-        vm.warp(start + 10 * 24 * 60 * 60);
-        emit log_uint(block.timestamp - start);
-        uint256 rA = tVesting.computeReleasableAmt(vs);
-        vm.assertEq(rA, 330);
+        IERC20(usdtAddress).approve(address(marketplace), usdtAmt);
+        bytes32 scheduleId = marketplace.buyTokensWithDiscount(usdtAmt, scheme);
+        TokenMarketplace.TokenScheme memory tokenScheme = marketplace.getTokenVestingScheme(scheme);
 
-        vm.warp(start + 15 * 24 * 60 * 60);
-        emit log_uint(block.timestamp - start);
-        uint256 rA1 = tVesting.computeReleasableAmt(vs);
-        vm.assertEq(rA1, 495);
+        // Simulate passing time for cliff and one slice period
+        vm.warp(block.timestamp + tokenScheme.vestingCliff + tokenScheme.slicePeriod);
 
-        vm.warp(start + duration);
-        emit log_uint(block.timestamp - start);
-        uint256 rA2 = tVesting.computeReleasableAmt(vs);
-        vm.assertEq(rA2, 1000);
+        // Calculate expected release amount
+        uint256 expectedReleaseAmount = (1000 * 10 ** 18) / (tokenScheme.vestingPeriod / tokenScheme.slicePeriod);
 
-        vm.warp(start + duration + 1 * 24 * 60 * 60);
-        emit log_uint(block.timestamp - start);
-        uint256 rA3 = tVesting.computeReleasableAmt(vs);
-        vm.assertEq(rA3, 1000);
+        // Release tokens
+        marketplace.withdrawTokens(scheduleId, expectedReleaseAmount);
+
+        // Assert token balance after release
+        uint256 buyerBalance = token.balanceOf(buyer);
+        assertEq(buyerBalance, expectedReleaseAmount, "Incorrect release amount");
+
+        vm.stopPrank();
     }
 
-    function testRevoked() public {
-        // create a vesting schedule
-        uint256 totalAmt = 1000;
-        uint256 duration = 30 * 24 * 60 * 60; // 30 days
-        uint256 cliff = 10 * 24 * 60 * 60; // 10 days
-        uint256 slicePeriod = 1 * 24 * 60 * 60; // 1 day
-        uint256 start = block.timestamp;
-        bool revocable = true;
-        bytes32 vestingScheduleId =
-            tVesting.createVestingSchedule(address(this), totalAmt, duration, slicePeriod, cliff, revocable);
+    function testRevokeTokens() public {
+        uint256 usdtAmt = 1000 * 10 ** 6; // 1000 USDT
+        uint8 scheme = 2;
 
-        tVesting.revoke(vestingScheduleId);
+        address buyer = USER;
+        vm.startPrank(buyer);
 
-        TokenVesting.VestingSchedule memory vs = tVesting.getVestingSchedule(vestingScheduleId);
-        vm.assertEq(vs.revoked, true);
+        IERC20(usdtAddress).approve(address(marketplace), usdtAmt);
+        bytes32 scheduleId = marketplace.buyTokensWithDiscount(usdtAmt, scheme);
 
-        vm.warp(start + cliff + 1 * 24 * 60 * 60);
-        uint256 rA = tVesting.computeReleasableAmt(vs);
-        vm.assertEq(rA, 0);
+        // Revoke vesting
+        vm.stopPrank();
+        vm.startPrank(address(marketplace.owner()));
+        marketplace.revokeVesting(scheduleId);
 
-        vm.expectRevert();
-        tVesting.release(vestingScheduleId, 8);
+        // Assert that the vesting is revoked
+        TokenVesting.VestingSchedule memory schedule = vestingScheduler.getVestingSchedule(scheduleId);
+        assertTrue(schedule.revoked, "Vesting should be revoked");
+
+        vm.stopPrank();
     }
 }

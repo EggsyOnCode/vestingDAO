@@ -17,6 +17,8 @@ contract TokenMarketplace is Ownable {
     uint256 public immutable PRICE;
     address public immutable USDT_ADDRESS;
     bool private REVOKABLE;
+    uint256 private constant DECIMALS = 1e18;
+    uint256 private constant DIVISOR_CORRECTOR = 1e10;
 
     struct TokenScheme {
         // Vesting period in months
@@ -73,17 +75,18 @@ contract TokenMarketplace is Ownable {
 
         int256 price = getPrice();
         // The amount to be transferred to vestingScheduler
-        uint256 tokenAmt = (discountedUsdt * uint256(price)) / PRICE;
+        uint256 tokenAmt = (discountedUsdt * DECIMALS / uint256(price)) / PRICE;
 
         // Transfer USDT to USDT_ADDRESS
         IERC20(USDT_ADDRESS).transferFrom(msg.sender, address(vestingScheduler), discountedUsdt);
         // Create VestingSchedule
+        uint256 totalAmt = tokenAmt / DIVISOR_CORRECTOR;
         bytes32 scheduleId = vestingScheduler.createVestingSchedule(
-            msg.sender, tokenAmt, scheme.vestingPeriod, scheme.slicePeriod, scheme.vestingCliff, REVOKABLE
+            msg.sender, totalAmt, scheme.vestingPeriod, scheme.slicePeriod, scheme.vestingCliff, REVOKABLE
         );
 
-        emit TokensBought(msg.sender, _usdtAmt, tokenAmt, _scheme);
-        emit VestingScheduleCreated(msg.sender, scheduleId, tokenAmt, _scheme);
+        emit TokensBought(msg.sender, _usdtAmt, totalAmt, _scheme);
+        emit VestingScheduleCreated(msg.sender, scheduleId, totalAmt, _scheme);
 
         return scheduleId;
     }
@@ -111,5 +114,9 @@ contract TokenMarketplace is Ownable {
 
     function isVestingRevokable() external view returns (bool) {
         return REVOKABLE;
+    }
+
+    function getTokenVestingScheme(uint256 _index) external view returns (TokenScheme memory) {
+        return tokenSchemes[_index];
     }
 }

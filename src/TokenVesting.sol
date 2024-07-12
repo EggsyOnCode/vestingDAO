@@ -120,7 +120,7 @@ contract TokenVesting is ReentrancyGuard, Ownable {
         return computeVestingSchduleId(_holder, nextVestingScheduleIndex + 1);
     }
 
-    function computeVestingSchduleId(address _holder, uint256 _vestingSchduleIndex) internal returns (bytes32) {
+    function computeVestingSchduleId(address _holder, uint256 _vestingSchduleIndex) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(_holder, _vestingSchduleIndex));
     }
 
@@ -144,11 +144,6 @@ contract TokenVesting is ReentrancyGuard, Ownable {
             uint256 iterations = _vestingSch.duration / slicePeriod; // 30
             uint256 pastIterations = timePassedSinceCreation / slicePeriod; // 10
             return (releasable / iterations) * pastIterations;
-            // uint256 slicePeriod = _vestingSch.slicePeriod;
-            // uint256 releasable = _vestingSch.totalAmt - _vestingSch.released;
-            // uint256 iterations = _vestingSch.duration % slicePeriod;
-            // uint256 pastIterations = timePassedSinceCreation % slicePeriod;
-            // return (releasable / iterations) * pastIterations;
         }
     }
 
